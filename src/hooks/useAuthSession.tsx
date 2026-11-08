@@ -41,32 +41,45 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
+function normalizeRoleCode(role?: string | null): string {
+  if (!role) return 'learner';
+  if (role === 'owner') return 'tenant_owner';
+  if (role === 'admin') return 'tenant_admin';
+  return role;
+}
+
 function normalizeSessionUser(res: TokenSessionResponse): AuthProfileResponse {
   const rawMemberships = res.memberships ?? res.user?.memberships ?? [];
-  const memberships: MembershipSummary[] = rawMemberships.map((m) => ({
-    ...m,
-    role: m.role ?? m.roles?.[0] ?? 'learner',
-    roles: m.roles ?? (m.role ? [m.role] : ['learner']),
-  }));
+  const memberships: MembershipSummary[] = rawMemberships.map((m) => {
+    const rawRole = m.role ?? m.roles?.[0] ?? 'learner';
+    const normRole = normalizeRoleCode(rawRole);
+    const normRoles = (m.roles ?? (m.role ? [m.role] : ['learner'])).map(normalizeRoleCode);
+    return {
+      ...m,
+      role: normRole,
+      roles: normRoles,
+    };
+  });
   const activeTenantId =
     res.active_tenant_id ??
     res.user?.active_tenant_id ??
     memberships[0]?.tenant_id ??
     null;
-  const activeRole =
+  const rawActiveRole =
     res.active_role ??
     res.user?.active_role ??
     res.user?.active_roles?.[0] ??
     memberships.find((m) => m.tenant_id === activeTenantId)?.role ??
     memberships[0]?.role ??
     null;
+  const activeRole = rawActiveRole ? normalizeRoleCode(rawActiveRole) : null;
 
   return {
     ...res.user,
     user_id: res.user?.user_id ?? res.user?.id ?? '',
     active_tenant_id: activeTenantId,
     active_role: activeRole,
-    active_roles: res.user?.active_roles ?? (activeRole ? [activeRole] : []),
+    active_roles: (res.user?.active_roles ?? (activeRole ? [activeRole] : [])).map(normalizeRoleCode),
     memberships,
   };
 }
@@ -87,13 +100,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const refreshProfile = useCallback(async () => {
     const profile = await apiRequest<AuthProfileResponse>('/auth/me');
-    const memberships = (profile.memberships ?? []).map((m) => ({
-      ...m,
-      role: m.role ?? m.roles?.[0] ?? 'learner',
-      roles: m.roles ?? (m.role ? [m.role] : ['learner']),
-    }));
-    const activeRole =
+    const memberships = (profile.memberships ?? []).map((m) => {
+      const normRole = normalizeRoleCode(m.role ?? m.roles?.[0] ?? 'learner');
+      return {
+        ...m,
+        role: normRole,
+        roles: (m.roles ?? (m.role ? [m.role] : ['learner'])).map(normalizeRoleCode),
+      };
+    });
+    const rawActiveRole =
       profile.active_role ?? profile.active_roles?.[0] ?? memberships[0]?.role ?? null;
+    const activeRole = rawActiveRole ? normalizeRoleCode(rawActiveRole) : null;
     setMemorySession({
       accessToken: undefined as unknown as string | null,
       activeTenantId: profile.active_tenant_id,
@@ -101,6 +118,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser({
       ...profile,
       active_role: activeRole,
+      active_roles: (profile.active_roles ?? (activeRole ? [activeRole] : [])).map(normalizeRoleCode),
       memberships,
     });
   }, []);

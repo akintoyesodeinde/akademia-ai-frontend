@@ -162,9 +162,9 @@ export function LearnerWorkspace() {
         body: JSON.stringify({ content: question }),
       });
     },
-    onSuccess: () => {
+    onSuccess: (msg) => {
       setTutorQuestion('');
-      queryClient.invalidateQueries({ queryKey: ['tutor', 'conversation', activeConversationId] });
+      queryClient.invalidateQueries({ queryKey: ['tutor', 'conversation', msg.conversation_id] });
     },
     onError: (err) =>
       setErrorMsg(err instanceof ApiClientError ? err.userFacingMessage : 'Tutor query failed.'),
