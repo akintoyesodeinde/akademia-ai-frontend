@@ -308,12 +308,21 @@ export const apiClient = {
       options: Array<{ label: string; option_text: string; is_correct: boolean }>;
     }>;
   }): Promise<AssessmentResponse> {
+    const backendTypeMap: Record<string, string> = {
+      quiz: 'formative',
+      exam: 'summative',
+      diagnostic: 'diagnostic',
+      practice: 'practice',
+      formative: 'formative',
+      summative: 'summative',
+      follow_up: 'follow_up',
+    };
     const created = await apiRequest<AssessmentResponse>(`/courses/${payload.course_id}/assessments`, {
       method: 'POST',
       body: JSON.stringify({
         title: payload.title,
         description: payload.description,
-        assessment_type: payload.assessment_type,
+        assessment_type: backendTypeMap[payload.assessment_type] ?? 'formative',
         passing_score_percentage: payload.passing_score_percent,
         time_limit_minutes: payload.time_limit_minutes,
         max_attempts: payload.max_attempts,
@@ -324,7 +333,7 @@ export const apiClient = {
           correct_answer: q.options.find((o) => o.is_correct)?.label ?? 'A',
           explanation: q.explanation,
           points: q.points,
-          difficulty: 'intermediate',
+          difficulty: 'medium',
           objective_ids: q.objective_id ? [q.objective_id] : [],
         })),
       }),
@@ -347,7 +356,7 @@ export const apiClient = {
   },
   async listPracticeDrafts(courseId: string): Promise<PracticeDraftResponse[]> {
     const drafts = await apiRequest<Array<PracticeDraftReviewResponse | PracticeDraftResponse>>(
-      `/ai/practice-questions?course_id=${courseId}`,
+      `/courses/${courseId}/practice-drafts`,
     );
     return (drafts || []).map(normalizePracticeDraft);
   },
@@ -357,26 +366,29 @@ export const apiClient = {
     question_count: number;
     difficulty_level: number;
   }): Promise<PracticeDraftResponse[]> {
-    const drafts = await apiRequest<Array<PracticeDraftReviewResponse | PracticeDraftResponse>>(
-      '/ai/practice-questions/generate',
-      {
-        method: 'POST',
-        body: JSON.stringify({
-          course_id: payload.course_id,
-          objective_ids: payload.objective_id ? [payload.objective_id] : [],
-          count: payload.question_count,
-          difficulty: 'intermediate',
-        }),
-      },
-    );
-    return (drafts || []).map(normalizePracticeDraft);
+    let targetObjectiveId = payload.objective_id;
+    if (!targetObjectiveId) {
+      const objs = await this.listObjectives(payload.course_id);
+      targetObjectiveId = objs[0]?.id ?? null;
+    }
+    const diffStr =
+      payload.difficulty_level <= 2 ? 'easy' : payload.difficulty_level >= 4 ? 'hard' : 'medium';
+    await apiRequest(`/courses/${payload.course_id}/practice-generation-jobs`, {
+      method: 'POST',
+      body: JSON.stringify({
+        objective_id: targetObjectiveId,
+        difficulty: diffStr,
+        question_count: payload.question_count,
+      }),
+    });
+    return this.listPracticeDrafts(payload.course_id);
   },
   async reviewPracticeDraft(
     draftId: string,
     action: 'approve' | 'reject',
   ): Promise<PracticeDraftResponse> {
     const updated = await apiRequest<PracticeDraftReviewResponse | PracticeDraftResponse>(
-      `/ai/practice-questions/${draftId}/review`,
+      `/practice-drafts/${draftId}/decision`,
       {
         method: 'POST',
         body: JSON.stringify({
@@ -417,30 +429,36 @@ export const apiClient = {
   },
   async listMembers(): Promise<MemberResponse[]> {
     const members = await apiRequest<MemberResponse[]>('/tenants/current/members');
+    const normalizeRole = (r?: string) =>
+      r === 'owner' ? 'tenant_owner' : r === 'admin' ? 'tenant_admin' : r ?? 'learner';
     return (members || []).map((m) => ({
       ...m,
-      role: m.role ?? m.roles?.[0] ?? 'learner',
+      role: normalizeRole(m.role ?? m.roles?.[0]),
     }));
   },
   async updateMemberRole(membershipId: string, role: string): Promise<MemberResponse> {
+    const backendRole =
+      role === 'tenant_owner' ? 'owner' : role === 'tenant_admin' ? 'admin' : role;
     const updated = await apiRequest<MemberResponse>(`/tenants/current/members/${membershipId}`, {
       method: 'PATCH',
-      body: JSON.stringify({ role_codes: [role] }),
+      body: JSON.stringify({ role_codes: [backendRole] }),
     });
+    const rawRole = updated.role ?? updated.roles?.[0] ?? role;
     return {
       ...updated,
-      role: updated.role ?? updated.roles?.[0] ?? role,
+      role: rawRole === 'owner' ? 'tenant_owner' : rawRole === 'admin' ? 'tenant_admin' : rawRole,
     };
   },
   async createInvitation(payload: {
     email: string;
     role: 'tenant_admin' | 'instructor' | 'learner';
   }): Promise<InvitationCreateResponse> {
+    const backendRole = payload.role === 'tenant_admin' ? 'admin' : payload.role;
     const res = await apiRequest<InvitationResponse>('/tenants/current/invitations', {
       method: 'POST',
       body: JSON.stringify({
         email: payload.email,
-        role_code: payload.role,
+        role_code: backendRole,
       }),
     });
     return {

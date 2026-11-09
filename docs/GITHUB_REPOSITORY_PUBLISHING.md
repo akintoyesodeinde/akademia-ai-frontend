@@ -15,3 +15,9 @@ Akademia AI strictly maintains two separate Git repositories (never a monorepo):
 - `npm run typecheck` -> `0 errors`
 - `npm test` -> `3 passed (3)`
 - `npm run build` -> Production Vite bundle built cleanly
+
+## 3. Published Branches & Commits
+
+- **Base Branch (`main`)**: `745ea5aff998c05d780a02a2b2961944757dc408`
+- **Feature Branch (`feat/docker-aws-cicd-deployment`)**: Pushed to `origin/feat/docker-aws-cicd-deployment`
+
